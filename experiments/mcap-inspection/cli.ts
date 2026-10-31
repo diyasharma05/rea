@@ -1,15 +1,7 @@
-import {
-  constants,
-  openSync,
-  closeSync,
-  lstatSync,
-  fstatSync,
-  readSync,
-} from "node:fs";
+import { closeSync, readSync } from "node:fs";
 import { resolve } from "node:path";
 import type { JsonValue } from "../../src/domain/jsonValue.js";
 import { jsonValueByteLength } from "../../src/domain/jsonValueByteLength.js";
-import { sameRegularFileState } from "../../src/filesystem/RegularFile.js";
 import { inspectSummary } from "./summary.ts";
 import {
   boundedJson,
@@ -19,7 +11,11 @@ import {
   OUTPUT_BYTES,
 } from "./limits.ts";
 import type { BoundedReadable } from "./limits.ts";
-import { fileState, observeFileState } from "./file-state.ts";
+import {
+  AdmissionEvidence,
+  fileState,
+  observeFileState,
+} from "./file-state.ts";
 import {
   omittedRequest,
   parseRequest,
@@ -100,19 +96,18 @@ async function main(): Promise<void> {
     if (!selection.ok) throw selection.error;
     const { input, schemaId } = selection.value;
     const path = resolve(input);
-    const named = lstatSync(path, { bigint: true });
+    const admission = new AdmissionEvidence();
+    source = { input, path, admission: admission.observations };
+    const named = admission.readPath(path);
     if (!named.isFile())
       throw new InspectionFailure(
         "input",
         "Select a regular file, not a directory, device or symlink",
       );
-    descriptor = openSync(
-      path,
-      constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
-    );
+    descriptor = admission.open(path);
     const fd = descriptor;
-    const initial = fstatSync(fd, { bigint: true });
-    if (!sameRegularFileState(named, initial))
+    const initial = admission.readDescriptor(fd, named);
+    if (admission.observations.matches_path !== true)
       throw new InspectionFailure("changed", "File changed during admission");
     source = {
       input,

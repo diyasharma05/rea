@@ -35,6 +35,11 @@ Node command writes one JSON object to stdout and returns 1 on failure.
   each with its own SHA-256. Those range hashes are **not a whole-file hash**.
 - Request arguments and parsed positionals, including rejected usage. A failed
   option check retains the caller's filename when it was parsed as a positional.
+- Admission failures retain the resolved path and separate pathname, open and
+  descriptor observations in `source.admission`. Each stage distinguishes
+  `not_attempted`, `failed` and its successful outcome; failed lookups retain
+  their diagnostics. An identity mismatch keeps both metadata snapshots. Once
+  admission succeeds, the usual source metadata replaces these stage receipts.
 - Independent post-read descriptor and pathname observations in `file_state`.
   Each retains metadata or its lookup error; `matches_initial: null` means the
   comparison could not be made. A failed descriptor check does not skip the path.
@@ -102,7 +107,14 @@ The suite also checks short summary-record boundaries, strings and schema bytes
 that overrun a record after a complete length prefix, final-response overflow,
 large reader diagnostics, and preservation of simultaneous failures.
 
-For the October 31, 2026 evidence fixes, the standard package test command built
+For the follow-up admission fix on October 31, 2026, the standard package test
+command built and ran with Node 24.22.1 / npm 11.16.0 on Windows x64: **47 passed,
+1 skipped** for unavailable symlink privileges. Six real-CLI regressions failed
+before the fix and passed afterward, covering directory/missing input, open and
+descriptor errors, pathname replacement, and combined admission/close failure.
+The request-budget regression also retains partial admission observations.
+
+For the earlier evidence fixes at `14f0c2d`, the standard package test command built
 successfully with Node 24.22.1 / npm 11.16.0 on Windows x64: **40 passed, 1 skipped**
 for unavailable symlink privileges. Ten CLI regressions first failed on the
 previous production code, then passed with the fixes. Separate negative controls
@@ -145,7 +157,7 @@ the extra parsing pass. These are observations, not a speedup claim.
 Whole agent-task tokens, a cold-storage run, macOS, and large real robot
 recordings remain unmeasured/unverified.
 
-For the October 31 fixes, equivalent commands on that demo were measured before
+For the earlier `14f0c2d` fixes, equivalent commands on that demo were measured before
 and after with Node 24.22.1. Each row records one initial fresh process followed
 by three more fresh processes. Wall time includes process launch; CPU and peak
 RSS come from the CLI's `process.resourceUsage()`. The CLI launches no children.
@@ -162,6 +174,18 @@ hash. The rejected option now retains its input and request. OS caches were
 uncontrolled and other validation ran concurrently, so these measurements do
 not establish a speed change. Cold-storage, output-token, and whole-agent-task
 token costs remain unmeasured; byte counts are not token counts.
+
+For the admission follow-up, the same measurement method compared `14f0c2d`
+with the fix. Directory rejection grew from 255 to 676 JSON bytes; successful
+`../demo.mcap --schema 1` output stayed at 2,871 bytes. Initial fresh-process wall
+times were 101.6/257.5 ms (directory, before/after) and 100.2/247.0 ms (success).
+Three subsequent directory runs took 82.8–97.9/218.8–230.9 ms wall time and
+62–108/233–234 ms CPU; successful runs took 80.6–87.0/233.4–241.4 ms wall time
+and 46–93/233–280 ms CPU. Peak process-family RSS across all runs stayed within
+46.8–47.4 MiB (the CLI has no children). Initial CPU times were 124/249 ms for
+directory rejection and 78/234 ms for success. Other checks ran concurrently and
+OS caches were uncontrolled; the timing difference is observed, not attributed
+to the fix. Cold-storage and token costs remain unmeasured.
 
 ## Decision for maintainers
 
