@@ -33,6 +33,14 @@ Node command writes one JSON object to stdout and returns 1 on failure.
   payload is decoded and no decompressor is loaded.
 - The selected path, observed file identity, and byte ranges actually read,
   each with its own SHA-256. Those range hashes are **not a whole-file hash**.
+- Request arguments and parsed positionals, including rejected usage. A failed
+  option check retains the caller's filename when it was parsed as a positional.
+- Independent post-read descriptor and pathname observations in `file_state`.
+  Each retains metadata or its lookup error; `matches_initial: null` means the
+  comparison could not be made. A failed descriptor check does not skip the path.
+- A failed read that consumed bytes retains their offset, actual length and
+  hash, with `complete: false` and the originally requested byte length. Earlier
+  completed ranges remain present; unread bytes have no claimed digest.
 
 The reader checks a nonzero summary CRC. It does not establish whole-file
 validity: it does not scan message data, validate all references, or reject
@@ -53,6 +61,10 @@ base64 expansion checked before encoding. Over-budget requests fail explicitly.
 If the full response exceeds the budget, a smaller failure receipt retains the
 source, read-range hashes and errors; the report is explicitly omitted. Error
 messages longer than 1,024 characters retain a prefix, full byte length and hash.
+If raw request provenance cannot fit, `request.omitted: "json_limit"` replaces it
+with the exact request JSON byte length and SHA-256. An oversized request is
+rejected before target access; a final receipt may also summarize the request
+to preserve its file observations and read evidence within the output budget.
 These are experimental resource budgets, not MCAP format limits or a bound on
 total Node memory. There is no paging or runtime override yet.
 
@@ -81,21 +93,31 @@ They cover duplicate topic names, 64-bit precision, omitted schemas/statistics,
 unknown compression, malformed magic/footer/CRC, missing summaries, read/output
 limits, selected-schema expansion, file/argument errors, and read-only CLI output.
 Controlled filesystem faults cover read denial, mutation after the final read,
-and close failure after success or a parse failure. These are simulated failures,
-not claims of naturally occurring OS permission or close-denial coverage.
+path replacement/removal, independent metadata lookup failures, partial reads
+followed by truncation or a read error, and close failure after success or a
+parse failure. These are controlled failures, not claims of naturally occurring
+OS permission or close-denial coverage.
 
 The suite also checks short summary-record boundaries, strings and schema bytes
 that overrun a record after a complete length prefix, final-response overflow,
 large reader diagnostics, and preservation of simultaneous failures.
 
-Executed with Node 24.18.0 on Windows x64: 21 passed and the real symlink test
+For the October 31, 2026 evidence fixes, the standard package test command built
+successfully with Node 24.22.1 / npm 11.16.0 on Windows x64: **40 passed, 1 skipped**
+for unavailable symlink privileges. Ten CLI regressions first failed on the
+previous production code, then passed with the fixes. Separate negative controls
+confirmed request-budget failures before target access and request-only omission
+when final metadata pushes a receipt over the output budget.
+
+Earlier verification with Node 24.18.0 on Windows x64: 21 passed and the real symlink test
 was skipped because symlink creation required unavailable OS privileges. Ubuntu
 under WSL2 passed all 22 tests, including real symlink rejection. The Linux run
 used the same emitted JavaScript and portable reader dependencies; it did not
-repeat npm installation or TypeScript compilation. For this update, the Windows
+repeat npm installation or TypeScript compilation. For that earlier update, the Windows
 compiler needed an explicit list of the same 11 source files: native discovery
 skipped the local OneDrive-backed files. Compiler options and dependencies were
 unchanged. Root CI currently does not install or run this standalone package's tests.
+Linux was not rerun for the October 31 fixes.
 
 The [990-byte upstream demo](https://github.com/foxglove/mcap/blob/9b4d3e36c7f7742541df33e0cff35c95de6af2a1/testdata/mcap/demo.mcap)
 returned profile `ros1`, `/chatter` (2 messages), `/diagnostics` (1), schema
@@ -122,6 +144,24 @@ peak RSS. Different concurrent load prevents attributing the timing difference t
 the extra parsing pass. These are observations, not a speedup claim.
 Whole agent-task tokens, a cold-storage run, macOS, and large real robot
 recordings remain unmeasured/unverified.
+
+For the October 31 fixes, equivalent commands on that demo were measured before
+and after with Node 24.22.1. Each row records one initial fresh process followed
+by three more fresh processes. Wall time includes process launch; CPU and peak
+RSS come from the CLI's `process.resourceUsage()`. The CLI launches no children.
+
+| Command / revision   | Initial wall ms | Repeated wall ms | Repeated CPU ms | Peak RSS MiB (all runs) | JSON bytes |
+| -------------------- | --------------: | ---------------: | --------------: | ----------------------: | ---------: |
+| `--schema 1`, before |           839.5 |       81.4–104.0 |           61–77 |               46.7–47.2 |      2,252 |
+| `--schema 1`, after  |            93.4 |        85.8–92.7 |          77–108 |               46.9–47.1 |      2,874 |
+| `--unknown`, before  |            79.3 |        76.0–82.3 |           62–77 |               46.6–46.9 |        289 |
+| `--unknown`, after   |           100.5 |       90.1–149.1 |          92–109 |               46.7–46.9 |        272 |
+
+The successful command retained the same four range hashes and unchanged input
+hash. The rejected option now retains its input and request. OS caches were
+uncontrolled and other validation ran concurrently, so these measurements do
+not establish a speed change. Cold-storage, output-token, and whole-agent-task
+token costs remain unmeasured; byte counts are not token counts.
 
 ## Decision for maintainers
 

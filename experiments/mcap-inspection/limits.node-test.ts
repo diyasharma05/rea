@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { TempBuffer } from "@mcap/core";
 import { recording } from "./fixtures.ts";
@@ -27,7 +28,7 @@ await test("refuses oversized declared header length before issuing the large re
   assert.deepEqual(requests, [17n]);
 });
 
-await test("refuses invalid ranges and short reads without inventing a digest", async () => {
+await test("refuses invalid ranges and retains only bytes returned by short reads", async () => {
   const readable = new BoundedReadable(new TempBuffer(Buffer.alloc(4)));
   for (const [offset, length] of [
     [-1n, 1n],
@@ -42,7 +43,21 @@ await test("refuses invalid ranges and short reads without inventing a digest", 
     read: async () => Buffer.alloc(1),
   });
   await assert.rejects(short.read(0n, 4n), /ended before/);
-  assert.deepEqual(short.reads, []);
+  assert.deepEqual(short.reads, [
+    {
+      offset: "0",
+      byte_length: "1",
+      sha256: createHash("sha256").update(Buffer.alloc(1)).digest("hex"),
+      requested_byte_length: "4",
+      complete: false,
+    },
+  ]);
+  const empty = new BoundedReadable({
+    size: async () => 4n,
+    read: async () => Buffer.alloc(0),
+  });
+  await assert.rejects(empty.read(0n, 4n), /ended before/);
+  assert.deepEqual(empty.reads, []);
 });
 
 await test("applies a cumulative read limit even when every individual read fits", async () => {

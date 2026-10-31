@@ -22,6 +22,25 @@ export class InspectionFailure extends Error {
   }
 }
 
+export class IncompleteReadFailure extends InspectionFailure {
+  constructor(
+    kind: "io" | "changed",
+    message: string,
+    readonly received: Uint8Array,
+  ) {
+    super(kind, message);
+  }
+}
+
+type ReadReceipt = {
+  readonly offset: string;
+  readonly byte_length: string;
+  readonly sha256: string;
+} & (
+  | { readonly complete: false; readonly requested_byte_length: string }
+  | { readonly complete?: never; readonly requested_byte_length?: never }
+);
+
 export function diagnostic(
   cause: unknown,
   fallback: InspectionFailure["kind"] = "reader_rejected",
@@ -52,8 +71,7 @@ export function boundedJson(value: JsonValue): string {
 /** Borrows the source; the CLI owns the descriptor and its final close. */
 export class BoundedReadable implements IReadable {
   readonly source: IReadable;
-  readonly reads: { offset: string; byte_length: string; sha256: string }[] =
-    [];
+  readonly reads: ReadReceipt[] = [];
   #charged = 0n;
   constructor(source: IReadable) {
     this.source = source;
@@ -79,17 +97,30 @@ export class BoundedReadable implements IReadable {
         `Cumulative reads exceed ${READ_BYTES} bytes`,
       );
     this.#charged += size;
-    const data = await this.source.read(offset, size);
+    let data: Uint8Array;
+    try {
+      data = await this.source.read(offset, size);
+    } catch (cause) {
+      if (cause instanceof IncompleteReadFailure && cause.received.length > 0)
+        this.#record(offset, size, cause.received);
+      throw cause;
+    }
+    if (data.byteLength > 0 || size === 0n) this.#record(offset, size, data);
     if (BigInt(data.byteLength) !== size)
       throw new InspectionFailure(
         "changed",
         "File ended before the requested range was read",
       );
+    return data;
+  }
+  #record(offset: bigint, size: bigint, data: Uint8Array) {
     this.reads.push({
       offset: String(offset),
-      byte_length: String(size),
+      byte_length: String(data.byteLength),
       sha256: createHash("sha256").update(data).digest("hex"),
+      ...(BigInt(data.byteLength) !== size
+        ? { complete: false as const, requested_byte_length: String(size) }
+        : {}),
     });
-    return data;
   }
 }
