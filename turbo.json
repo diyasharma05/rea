@@ -75,6 +75,7 @@
         ".oxlintrc.json",
         "package.json",
         "package-lock.json",
+        "experiments/mcap-inspection/*.ts",
         "scripts/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
         "src/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
         "tests/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}",
